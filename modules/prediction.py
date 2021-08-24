@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,14 +21,24 @@ class Attention(nn.Module):
         one_hot = torch.FloatTensor(batch_size, onehot_dim).zero_().to(device)
         one_hot = one_hot.scatter_(1, input_char, 1)
         return one_hot
-
-    def forward(self, batch_H, text, is_train=True, batch_max_length=25):
+    
+    def updateprobs_step(self, probs_step, step, regex, character_list):
+        #TODO update this function.
+        if(step < 5 or step > 8):
+            probs_step[:, 2:12]=-math.inf
+        else:
+            probs_step[:, 0:2] = -math.inf
+            probs_step[:, 12:] = -math.inf
+        return probs_step
+    
+    def forward(self, batch_H, text, is_train=True, batch_max_length=25, regex=None,character_list=None):
         """
         input:
             batch_H : contextual_feature H = hidden state of encoder. [batch_size x num_steps x contextual_feature_channels]
             text : the text-index of each image. [batch_size x (max_length+1)]. +1 for [GO] token. text[:, 0] = [GO].
         output: probability distribution at each step [batch_size x num_steps x num_classes]
         """
+        
         batch_size = batch_H.size(0)
         num_steps = batch_max_length + 1  # +1 for [s] at end of sentence.
 
@@ -51,6 +63,9 @@ class Attention(nn.Module):
                 char_onehots = self._char_to_onehot(targets, onehot_dim=self.num_classes)
                 hidden, alpha = self.attention_cell(hidden, batch_H, char_onehots)
                 probs_step = self.generator(hidden[0])
+                
+                if regex:  #set probablities of some characters to infinity as per regex requirement.
+                    probs_step = self.updateprobs_step(probs_step, i, regex, character_list)
                 probs[:, i, :] = probs_step
                 _, next_input = probs_step.max(1)
                 targets = next_input

@@ -61,7 +61,7 @@ def demo(opt):
                 preds_str = converter.decode(preds_index, preds_size)
 
             else:
-                preds = model(image, text_for_pred, is_train=False)
+                preds = model(image, text_for_pred, is_train=False, regex="[A-Z]{5}[0-9]{4}[A-Z]{1}")
 
                 # select max probabilty (greedy decoding) then decode index to character
                 _, preds_index = preds.max(2)

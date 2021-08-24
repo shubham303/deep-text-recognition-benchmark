@@ -27,6 +27,10 @@ class Model(nn.Module):
     def __init__(self, opt):
         super(Model, self).__init__()
         self.opt = opt
+        # list toke variable is copied from AttentionLabelConvertor class from utils.py if you make changes there for
+        # the same variable , then update this variable also.
+        list_token = ['[GO]', '[s]']
+        self.character =    list_token+list(self.opt.character)
         self.stages = {'Trans': opt.Transformation, 'Feat': opt.FeatureExtraction,
                        'Seq': opt.SequenceModeling, 'Pred': opt.Prediction}
 
@@ -67,7 +71,11 @@ class Model(nn.Module):
         else:
             raise Exception('Prediction is neither CTC or Attn')
 
-    def forward(self, input, text, is_train=True):
+    # regex is used if we expect predicted text to follow certain pattern. ex: regex for PAN number is "[A-Z]{5}[
+    # 0-9]{4}[A-Z]{1}" so here for first five positions, prediction probablities of numbers and special characters
+    # are set to -infinity.
+    def forward(self, input, text, is_train=True, regex=None):
+
         """ Transformation stage """
         if not self.stages['Trans'] == "None":
             input = self.Transformation(input)
@@ -84,9 +92,11 @@ class Model(nn.Module):
             contextual_feature = visual_feature  # for convenience. this is NOT contextually modeled by BiLSTM
 
         """ Prediction stage """
+        #TODO remove CTC related code. keep Attention only.
         if self.stages['Pred'] == 'CTC':
-            prediction = self.Prediction(contextual_feature.contiguous())
+            prediction = self.Prediction(contextual_feature.contiguous(), regex)
         else:
-            prediction = self.Prediction(contextual_feature.contiguous(), text, is_train, batch_max_length=self.opt.batch_max_length)
+            prediction = self.Prediction(contextual_feature.contiguous(), text, is_train,
+                                        self.opt.batch_max_length,regex,  self.character)
 
         return prediction
