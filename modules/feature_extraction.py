@@ -154,7 +154,7 @@ class ResNet(nn.Module):
 
     def __init__(self, input_channel, output_channel, block, layers):
         super(ResNet, self).__init__()
-
+       
         self.output_channel_block = [int(output_channel / 4), int(output_channel / 2), output_channel, output_channel]
 
         self.inplanes = int(output_channel / 8)
@@ -191,7 +191,15 @@ class ResNet(nn.Module):
         self.conv4_2 = nn.Conv2d(self.output_channel_block[3], self.output_channel_block[
                                  3], kernel_size=2, stride=1, padding=0, bias=False)
         self.bn4_2 = nn.BatchNorm2d(self.output_channel_block[3])
+        """
+        import torchvision.models as models
+        res = models.resnet34(pretrained=True)
+        res.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
+        res = list(res.children())[:-2]
+        self.resnet= nn.Sequential(*res)
+        """
+        
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
@@ -244,3 +252,4 @@ class ResNet(nn.Module):
         x = self.relu(x)
 
         return x
+       

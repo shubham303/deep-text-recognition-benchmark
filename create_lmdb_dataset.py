@@ -40,11 +40,13 @@ def createDataset(inputPath, gtFile, outputPath, checkValid=True):
     cnt = 1
 
     with open(gtFile, 'r', encoding='utf-8') as data:
-        datalist = data.read().split("\i")[:-1]
+        datalist = data.read().split("\n")[:-1]
     
 
     nSamples = len(datalist)
     for i in range(nSamples):
+        if i>100000:
+            break
         imagePath, label = datalist[i].split('\t')
         imagePath = os.path.join(inputPath, imagePath)
 
@@ -57,6 +59,7 @@ def createDataset(inputPath, gtFile, outputPath, checkValid=True):
             continue
         with open(imagePath, 'rb') as f:
             imageBin = f.read()
+        
         if checkValid:
             try:
                 if not checkImageIsValid(imageBin):

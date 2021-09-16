@@ -216,3 +216,6 @@ demo_image/
 log_demo_result.txt
 Prediction_English_FT.csv
 .idea/
+misclassified/
+correctclassifiedt/
+.data/
