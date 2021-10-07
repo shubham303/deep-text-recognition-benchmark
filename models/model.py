@@ -64,7 +64,8 @@ class Model(nn.Module):
 			self.SequenceModeling_output = self.FeatureExtraction_output
 		
 		""" Prediction """
-		
+		if opt.Prediction == 'CTC':
+			self.Prediction = nn.Linear(self.SequenceModeling_output, opt.num_class)
 		if opt.Prediction == 'Attn':
 			self.Prediction = Attention(self.SequenceModeling_output, opt.hidden_size, opt.num_class)
 		elif opt.Prediction == "transformer":
@@ -101,6 +102,8 @@ class Model(nn.Module):
 			contextual_feature = visual_feature  # for convenience. this is NOT contextually modeled by BiLSTM
 
 		""" Prediction stage """
+		if self.stages['Pred'] == 'CTC':
+			prediction = self.Prediction(contextual_feature.contiguous())
 		if self.stages['Pred'] == "Attn":
 			prediction = self.Prediction(contextual_feature.contiguous(), text, is_train,
 			                             self.opt.batch_max_length, regex, self.character)

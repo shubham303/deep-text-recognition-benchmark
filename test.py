@@ -9,7 +9,6 @@ import torch.utils.data
 import torch.nn.functional as F
 import numpy as np
 from nltk.metrics.distance import edit_distance
-from torch.nn import init
 
 import configuration
 from utils import AttnLabelConverter, Averager, getCharacterList, CTCLabelConverter

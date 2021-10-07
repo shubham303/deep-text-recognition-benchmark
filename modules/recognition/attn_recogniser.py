@@ -3,19 +3,23 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 
 import configuration
 
 
-class CTCRecogniser(nn.Module):
+class AttnRecogniser(nn.Module):
 	
-	def __init__(self, encoder: Tensor , decoder:Tensor):
+	def __init__(self,  decoder,opt, encoder=None):
 		super().__init__()
 		self.encoder = encoder
 		self.decoder= decoder
 	
 	def forward(self, x):
-		x= self.encoder(x)
+		if self.encoder is not None:
+			x= self.encoder(x)
+		x=self.decoder(x)
+		
 
 class Attention(nn.Module):
 	
@@ -33,6 +37,8 @@ class Attention(nn.Module):
 		one_hot = one_hot.scatter_(1, input_char, 1)
 		return one_hot
 	
+	
+	#TODO move this function to utils.
 	def updateprobs_step(self, probs_step, step, regex, character_list):
 		# TODO update this function.
 		if (step < 5 or step > 8):
