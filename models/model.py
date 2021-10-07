@@ -19,7 +19,7 @@ import torch.nn as nn
 from modules.Transformer import Seq2SeqTransformer, create_mask
 from modules.feature_extraction import VGG_FeatureExtractor, RCNN_FeatureExtractor, ResNet_FeatureExtractor
 from modules.prediction import Attention
-from modules.sequence_modeling import BidirectionalLSTM
+from modules.recognition.sequence_modeling import BidirectionalLSTM
 from modules.transformation import TPS_SpatialTransformerNetwork
 
 
@@ -73,9 +73,9 @@ class Model(nn.Module):
 			                                     opt.attention_heads,
 			                                     opt.num_class,
 			                                     opt.hidden_size)
-			# for p in self.Prediction.parameters():
-			#   if p.dim() > 1:
-			#        nn.init.xavier_uniform_(p)
+			for p in self.Prediction.parameters():
+				if p.dim() > 1:
+					nn.init.xavier_uniform_(p)
 		else:
 			raise Exception('Prediction is neither Attn or transformer')
 	

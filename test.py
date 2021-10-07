@@ -1,10 +1,8 @@
 import os
 import time
-import string
 import argparse
 import re
 
-import cv2
 import torch
 import torch.backends.cudnn as cudnn
 import torch.utils.data
@@ -14,9 +12,9 @@ from nltk.metrics.distance import edit_distance
 from torch.nn import init
 
 import configuration
-from utils import AttnLabelConverter, Averager, TransformerLabelConvertor, getCharacterList
+from utils import AttnLabelConverter, Averager, getCharacterList, CTCLabelConverter
 from dataset import hierarchical_dataset, AlignCollate
-from model import Model
+from models.model import Model
 
 
 def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=False):
@@ -96,22 +94,43 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         # For max length prediction
         length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(configuration.device)
         # todo text_for_pred is not used during eval. remove it. and make necessary changes in model too.
-        #text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(configuration.device)
+        text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(configuration.device)
 
         text_for_loss, length_for_loss = converter.encode(labels, batch_max_length=opt.batch_max_length)
 
         start_time = time.time()
-        
-        preds = model(image, text[:, :-1], is_train=True)
-        forward_time = time.time() - start_time
-        preds = preds[:, :text_for_loss.shape[1] - 1, :]
-        target = text_for_loss[:, 1:]  # without [GO] Symbol
-        cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1))
+        if 'CTC' in opt.Prediction:
+            preds = model(image, text_for_pred)
+            forward_time = time.time() - start_time
 
-        # select max probabilty (greedy decoding) then decode index to character
-        _, preds_index = preds.max(2)
-        preds_str = converter.decode(preds_index, length_for_pred)
-        labels = converter.decode(text_for_loss[:, 1:], length_for_loss)
+            # Calculate evaluation loss for CTC deocder.
+            preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+            # permute 'preds' to use CTCloss format
+            if opt.baiduCTC:
+                cost = criterion(preds.permute(1, 0, 2), text_for_loss, preds_size, length_for_loss) / batch_size
+            else:
+                cost = criterion(preds.log_softmax(2).permute(1, 0, 2), text_for_loss, preds_size, length_for_loss)
+
+            # Select max probabilty (greedy decoding) then decode index to character
+            if opt.baiduCTC:
+                _, preds_index = preds.max(2)
+                preds_index = preds_index.view(-1)
+            else:
+                _, preds_index = preds.max(2)
+            preds_str = converter.decode(preds_index.data, preds_size.data)
+        
+        else:
+            preds = model(image, text_for_pred, is_train=False)
+            forward_time = time.time() - start_time
+
+            preds = preds[:, :text_for_loss.shape[1] - 1, :]
+            target = text_for_loss[:, 1:]  # without [GO] Symbol
+            cost = criterion(preds.contiguous().view(-1, preds.shape[-1]), target.contiguous().view(-1))
+    
+            # select max probabilty (greedy decoding) then decode index to character
+            _, preds_index = preds.max(2)
+            preds_str = converter.decode(preds_index, length_for_pred)
+            labels = converter.decode(text_for_loss[:, 1:], length_for_loss)
 
         infer_time += forward_time
         valid_loss_avg.add(cost)
@@ -121,11 +140,11 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         preds_max_prob, _ = preds_prob.max(dim=2)
         confidence_score_list = []
         for gt, pred, pred_max_prob, img in zip(labels, preds_str, preds_max_prob, image_tensors):
-         
-            gt = gt[:gt.find('[s]')]
-            pred_EOS = pred.find('[s]')
-            pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
-            pred_max_prob = pred_max_prob[:pred_EOS]
+            if opt.Prediction  in ['Attn', 'transformer']:
+                gt = gt[:gt.find('[s]')]
+                pred_EOS = pred.find('[s]')
+                pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+                pred_max_prob = pred_max_prob[:pred_EOS]
 
             # To evaluate 'case sensitive model' with alphanumeric and case insensitve setting.
             if opt.sensitive and opt.data_filtering_off:
@@ -135,12 +154,11 @@ def validation(model, criterion, evaluation_loader, converter, opt):
                 out_of_alphanumeric_case_insensitve = f'[^{alphanumeric_case_insensitve}]'
                 pred = re.sub(out_of_alphanumeric_case_insensitve, '', pred)
                 gt = re.sub(out_of_alphanumeric_case_insensitve, '', gt)
-            from torchvision.utils import save_image
             if pred == gt:
                 n_correct += 1
                 #save_image(img, "correctclassified/" + pred + ".png")
             else:
-                from torchvision.utils import save_image
+                pass
                 #save_image(img, "misclassified/"+gt+"_"+pred+".png")
             
             # ICDAR2019 Normalized Edit Distance
@@ -168,8 +186,8 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 
 def test(opt):
     """ model configuration """
-    if 'transformer' in opt.Prediction:
-        converter = TransformerLabelConvertor(opt.character)
+    if 'CTC' in opt.Prediction:
+        converter = CTCLabelConverter(opt.character)
     else:
         converter = AttnLabelConverter(opt.character)
 
@@ -181,21 +199,7 @@ def test(opt):
     print('model input parameters', opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel,
           opt.hidden_size, opt.num_class, opt.batch_max_length, opt.Transformation, opt.FeatureExtraction,
           opt.SequenceModeling, opt.Prediction)
-
-    # weight initialization
-    for name, param in model.named_parameters():
-        if 'localization_fc2' in name:
-            print(f'Skip {name} as it is already initialized')
-            continue
-        try:
-            if 'bias' in name:
-                init.constant_(param, 0.0)
-            elif 'weight' in name:
-                init.kaiming_normal_(param)
-        except Exception as e:  # for batchnorm.
-            if 'weight' in name:
-                param.data.fill_(1)
-            continue
+    
     model = torch.nn.DataParallel(model).to(configuration.device)
 
     # load model
@@ -209,11 +213,12 @@ def test(opt):
     os.system(f'cp {opt.saved_model} ./result/{opt.exp_name}/')
 
     """ setup loss """
-
-    if 'transformer' in opt.Prediction:
-        criterion = torch.nn.CrossEntropyLoss(ignore_index=2).to(configuration.device)  # ignore padding token
+    if 'CTC' in opt.Prediction:
+        criterion = torch.nn.CTCLoss(zero_infinity=True).to(configuration.device)
     else:
-        criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(configuration.device)  # ignore [GO] token = ignore index 0
+        #TODO ignore index value in transformer and lstm based decoder is different.
+        criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(configuration.device)  # ignore [GO] token = ignore
+        # index 0
     """ evaluation """
     model.eval()
     with torch.no_grad():

@@ -1,22 +1,20 @@
 import argparse
-import string
 
 import torch
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 import torch.utils.data
-from pyparsing import unichr
 
 import configuration
 from dataset import RawDataset, AlignCollate
-from model import Model
-from utils import AttnLabelConverter, TransformerLabelConvertor, getCharacterList
+from models.model import Model
+from utils import AttnLabelConverter, getCharacterList, CTCLabelConverter
 
 
 def demo(opt):
 	""" model configuration """
-	if 'transformer' in opt.Prediction:
-		converter = TransformerLabelConvertor(opt.character)
+	if 'CTC' in opt.Prediction:
+		converter = CTCLabelConverter(opt.character)
 	else:
 		converter = AttnLabelConverter(opt.character)
 	
@@ -53,12 +51,20 @@ def demo(opt):
 			length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(configuration.device)
 			#todo text_for_pred is not used during eval. remove it. and make necessary changes in model too.
 			text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(configuration.device)
+			if 'CTC' in opt.Prediction:
+				preds = model(image, text_for_pred)
+
+				# Select max probabilty (greedy decoding) then decode index to character
+				preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+				_, preds_index = preds.max(2)
+				# preds_index = preds_index.view(-1)
+				preds_str = converter.decode(preds_index, preds_size)
+			else:
+				preds = model(image, text_for_pred, is_train=False)
 			
-			preds = model(image, text_for_pred, is_train=False, regex=None)  # regex ="[A-Z]{5}[0-9]{4}[A-Z]{1}"
-			
-			# select max probabilty (greedy decoding) then decode index to character
-			_, preds_index = preds.max(2)
-			preds_str = converter.decode(preds_index, length_for_pred)
+				# select max probabilty (greedy decoding) then decode index to character
+				_, preds_index = preds.max(2)
+				preds_str = converter.decode(preds_index, length_for_pred)
 			
 			log = open(f'./log_demo_result.txt', 'a')
 			dashed_line = '-' * 80
@@ -83,7 +89,6 @@ def demo(opt):
 			
 			log.close()
 
-
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--image_folder', required=True, help='path to image_folder which contains text images')
@@ -102,7 +107,7 @@ if __name__ == '__main__':
 	parser.add_argument('--Transformation', type=str, required=True, help='Transformation stage. None|TPS')
 	parser.add_argument('--FeatureExtraction', type=str, required=True, help='FeatureExtraction stage. VGG|RCNN|ResNet')
 	parser.add_argument('--SequenceModeling', type=str, required=True, help='SequenceModeling stage. None|BiLSTM')
-	parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. transformer|Attn')
+	parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. CTC|Attn')
 	parser.add_argument('--num_fiducial', type=int, default=20, help='number of fiducial points of TPS-STN')
 	parser.add_argument('--input_channel', type=int, default=1, help='the number of input channel of Feature extractor')
 	parser.add_argument('--output_channel', type=int, default=512,
@@ -115,13 +120,11 @@ if __name__ == '__main__':
 	opt = parser.parse_args()
 
 """ vocab / character number configuration """
-#if opt.sensitive:
-#	opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
+
+#TODO handle english character sensitive case
 opt.character=getCharacterList(opt.lang)
 """ vocab / character number configuration """
-#opt.character = [unichr(s) for s in range(0x900, 0x980)]
-#opt.character.append('\u200d')
-#opt.character.append('\u200c')
+
 cudnn.benchmark = True
 cudnn.deterministic = True
 opt.num_gpu = torch.cuda.device_count()

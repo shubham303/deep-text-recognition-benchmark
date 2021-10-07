@@ -2,7 +2,6 @@ import os
 import sys
 import time
 import random
-import string
 import argparse
 
 import torch
@@ -13,9 +12,9 @@ import torch.utils.data
 import numpy as np
 
 import configuration
-from utils import  AttnLabelConverter, Averager, TransformerLabelConvertor, getCharacterList
+from utils import AttnLabelConverter, Averager, getCharacterList, CTCLabelConverterForBaiduWarpctc, CTCLabelConverter
 from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset
-from model import Model
+from models.model import Model
 from test import validation
 
 
@@ -44,8 +43,11 @@ def train(opt):
     log.close()
     
     """ model configuration """
-    if 'transformer' in opt.Prediction:
-        converter = TransformerLabelConvertor(opt.character)
+    if 'CTC' in opt.Prediction:
+        if opt.baiduCTC:
+            converter = CTCLabelConverterForBaiduWarpctc(opt.character)
+        else:
+            converter = CTCLabelConverter(opt.character)
     else:
         converter = AttnLabelConverter(opt.character)
 
@@ -86,8 +88,13 @@ def train(opt):
     print(model)
 
     """ setup loss """
-    if 'transformer' in opt.Prediction:
-        criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(configuration.device)   #ignore padding token
+    if 'CTC' in opt.Prediction:
+        if opt.baiduCTC:
+            # need to install warpctc. see our guideline.
+            from warpctc_pytorch import CTCLoss
+            #criterion = CTCLoss()
+        else:
+            criterion = torch.nn.CTCLoss(zero_infinity=True).to(configuration.device)
     else:
         criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(configuration.device)  # ignore [GO] token = ignore index 0
     # loss averager
@@ -140,11 +147,22 @@ def train(opt):
         image_tensors, labels = train_dataset.get_batch()
         image = image_tensors.to(configuration.device)
         text, length = converter.encode(labels, batch_max_length=opt.batch_max_length)
+        batch_size = image.size(0)
 
+        if 'CTC' in opt.Prediction:
+            preds = model(image, text)
+            preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+            if opt.baiduCTC:
+                preds = preds.permute(1, 0, 2)  # to use CTCLoss format
+                cost = criterion(preds, text, preds_size, length) / batch_size
+            else:
+                preds = preds.log_softmax(2).permute(1, 0, 2)
+                cost = criterion(preds, text, preds_size, length)
      
-        preds = model(image, text[:, :-1])  #align with Attention.forward
-        target = text[:, 1:]  # without [GO] Symbol
-        cost = criterion(preds.view(-1, preds.shape[-1]), target.contiguous().view(-1))
+        else:
+            preds = model(image, text[:, :-1])  #align with Attention.forward
+            target = text[:, 1:]  # without [GO] Symbol
+            cost = criterion(preds.view(-1, preds.shape[-1]), target.contiguous().view(-1))
 
         model.zero_grad()
         cost.backward()
@@ -220,11 +238,11 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', help='Where to store logs and models')
     parser.add_argument('--train_data', required=True, help='path to training dataset')
     parser.add_argument('--valid_data', required=True, help='path to validation dataset')
-    parser.add_argument('--manualSeed', type=int, default=1, help='for random seed setting')
+    parser.add_argument('--manualSeed', type=int, default=1111, help='for random seed setting')
     parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
-    parser.add_argument('--batch_size', type=int, default=256, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=192, help='input batch size')
     parser.add_argument('--num_iter', type=int, default=300000, help='number of iterations to train for')
-    parser.add_argument('--valInterval', type=int, default=5000,help='Interval between each validation')
+    parser.add_argument('--valInterval', type=int, default=2000, help='Interval between each validation')
     parser.add_argument('--saved_model', default='', help="path to model to continue training")
     parser.add_argument('--FT', action='store_true', help='whether to do fine-tuning')
     parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is Adadelta)')
@@ -254,7 +272,7 @@ if __name__ == '__main__':
     parser.add_argument('--FeatureExtraction', type=str, required=True,
                         help='FeatureExtraction stage. VGG|RCNN|ResNet')
     parser.add_argument('--SequenceModeling', type=str, required=True, help='SequenceModeling stage. None|BiLSTM')
-    parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. transformer|Attn')
+    parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. CTC|Attn')
     parser.add_argument('--num_fiducial', type=int, default=20, help='number of fiducial points of TPS-STN')
     parser.add_argument('--input_channel', type=int, default=1,
                         help='the number of input channel of Feature extractor')
@@ -293,7 +311,7 @@ if __name__ == '__main__':
     cudnn.benchmark = True
     cudnn.deterministic = True
     opt.num_gpu = torch.cuda.device_count()
-    print('configuration.device count', opt.num_gpu)
+    print('device count', opt.num_gpu)
     if opt.num_gpu > 1:
         print('------ Use multi-GPU setting ------')
         print('if you stuck too long time with multi-GPU setting, try to set --workers 0')
@@ -301,4 +319,12 @@ if __name__ == '__main__':
         opt.workers = opt.workers * opt.num_gpu
         opt.batch_size = opt.batch_size * opt.num_gpu
         
+        """ previous version
+        print('To equlize batch stats to 1-GPU setting, the batch_size is multiplied with num_gpu and multiplied batch_size is ', opt.batch_size)
+        opt.batch_size = opt.batch_size * opt.num_gpu
+        print('To equalize the number of epochs to 1-GPU setting, num_iter is divided with num_gpu by default.')
+        If you dont care about it, just commnet out these line.)
+        opt.num_iter = int(opt.num_iter / opt.num_gpu)
+        """
+
     train(opt)
