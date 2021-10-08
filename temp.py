@@ -1,6 +1,13 @@
-import torch
-t = torch.LongTensor(4, 6,8).fill_(2)
-
-x= t[:,:-1]
-
-print(x.size())
+class A:
+	def a(self, i):
+		i.j=10
+	
+class B :
+	j =10
+	
+s=A()
+b=B()
+b.j=100
+print(b.j)
+s.a(b)
+print(b.j)

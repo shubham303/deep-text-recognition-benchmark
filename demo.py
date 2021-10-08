@@ -7,7 +7,7 @@ import torch.utils.data
 
 import configuration
 from dataset import RawDataset, AlignCollate
-from models.model import Model
+from models.four_stage_model import Model
 from utils import AttnLabelConverter, getCharacterList, CTCLabelConverter
 
 

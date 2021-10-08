@@ -13,7 +13,7 @@ from nltk.metrics.distance import edit_distance
 import configuration
 from utils import AttnLabelConverter, Averager, getCharacterList, CTCLabelConverter
 from dataset import hierarchical_dataset, AlignCollate
-from models.model import Model
+from models.four_stage_model import Model
 
 
 def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=False):

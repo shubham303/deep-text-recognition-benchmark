@@ -1,32 +1,56 @@
 import math
 
 import torch
-from einops.layers.torch import Rearrange
 from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer, Transformer, TransformerDecoderLayer, \
-    TransformerDecoder, LayerNorm
+	TransformerDecoder, LayerNorm
 
 import configuration
 
 
-
-
-
-
 class TransformerRecogniser(nn.Module):
+	def __init__(self, opt, input_size, dropout=0.1):
+		"""
+		opt : contains arguments passed to the program
+		input_size= size of input feature vectors, input_size depends on size of output of last layer.
+		"""
+		super().__init__()
+		patch_emb = TokenEmbedding(opt.num_class, input_size)
+		positional_encoding = PositionalEncoding(
+			opt.emb_size, dropout=dropout)
+		self.Prediction = Seq2SeqTransformer(opt.encoder_count,
+		                                     opt.decoder_count,
+		                                     patch_emb,
+		                                     positional_encoding,
+		                                     input_size,
+		                                     opt.attention_heads,
+		                                     opt.num_class,
+		                                     opt.hidden_size
+		                                     )
+		for p in self.Prediction.parameters():
+			if p.dim() > 1:
+				nn.init.xavier_uniform_(p)
+	
+	def forward(self, x):
+		return self.Prediction(x.contiguous())
+
+
+class Seq2SeqTransformer(nn.Module):
 	
 	def __init__(self,
 	             num_encoder_layers: int,
 	             num_decoder_layers: int,
 	             patch_embedding,
 	             positional_encoding,
-	             custom_encoder=None,
-	             custom_decoder=None,
 	             emb_size: int = 512,
 	             nhead: int = 8,
 	             tgt_vocab_size: int = 25,
 	             dim_feedforward: int = 512,
-	             dropout: float = 0.1):
+	             dropout: float = 0.1,
+	             custom_encoder = None,
+		        custom_decoder = None,
+	
+	):
 		"""
 
 		:param num_encoder_layers:
@@ -119,3 +143,50 @@ class TransformerRecogniser(nn.Module):
 		return self.transformer.decoder(self.positional_encoding(self.tgt_tok_emb(
 			tgt)), memory,
 			tgt_mask)
+
+
+class TokenEmbedding(nn.Module):
+	def __init__(self, vocab_size: int, emb_size):
+		super(TokenEmbedding, self).__init__()
+		self.embedding = nn.Embedding(vocab_size, emb_size)
+		self.emb_size = emb_size
+	
+	def forward(self, tokens: Tensor):
+		return self.embedding(tokens.long()) * math.sqrt(self.emb_size)
+
+
+class PositionalEncoding(nn.Module):
+	def __init__(self,
+	             emb_size: int,
+	             dropout: float,
+	             maxlen: int = 5000):
+		super(PositionalEncoding, self).__init__()
+		den = torch.exp(- torch.arange(0, emb_size, 2) * math.log(10000) / emb_size)
+		pos = torch.arange(0, maxlen).reshape(maxlen, 1)
+		pos_embedding = torch.zeros((maxlen, emb_size))
+		pos_embedding[:, 0::2] = torch.sin(pos * den)
+		pos_embedding[:, 1::2] = torch.cos(pos * den)
+		pos_embedding = pos_embedding.unsqueeze(-2)
+		
+		self.dropout = nn.Dropout(dropout)
+		self.register_buffer('pos_embedding', pos_embedding)
+	
+	def forward(self, token_embedding: Tensor):
+		return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
+
+def generate_square_subsequent_mask(sz):
+	mask = (torch.triu(torch.ones((sz, sz), device=configuration.device)) == 1).transpose(0, 1)
+	mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+	return mask
+
+
+def create_mask(src, tgt):
+	# todo make dimension of src is wrong
+	src_seq_len = src.shape[2]
+	tgt_seq_len = tgt.shape[1]
+	tgt_mask = generate_square_subsequent_mask(tgt_seq_len)
+	src_mask = torch.zeros((src_seq_len, src_seq_len), device=configuration.device).type(torch.bool)
+	# 2: index of padding token in character list.
+	tgt_padding_mask = (tgt == 0)
+	tgt_padding_mask[:, 0] = False  # dont mask first go symbol
+	return src_mask, tgt_mask, tgt_padding_mask

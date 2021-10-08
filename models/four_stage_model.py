@@ -16,69 +16,41 @@ limitations under the License.
 
 import torch.nn as nn
 
-from modules.Transformer import Seq2SeqTransformer, create_mask
+from modules.recognition.transformer_recogniser import Seq2SeqTransformer, create_mask
 from modules.feature_extraction import VGG_FeatureExtractor, RCNN_FeatureExtractor, ResNet_FeatureExtractor
-from modules.prediction import Attention
-from modules.recognition.sequence_modeling import BidirectionalLSTM
+from modules.recognition.attn_recogniser import Attention
+from modules.sequence_modeling import BidirectionalLSTM
 from modules.transformation import TPS_SpatialTransformerNetwork
+from model_factories.ModelFactory import TransformationModelFactory, FeatureExtractorFactory, EncoderFactory, \
+	RecogniserFactory
 
 
-class Model(nn.Module):
+class FourStageModel(nn.Module):
 	
 	def __init__(self, opt, character):
-		super(Model, self).__init__()
+		super(FourStageModel, self).__init__()
 		self.opt = opt
 		# self.character is passed to prediction model to mask certain characters during prediction of regex based text
 		self.character = character
 		self.stages = {'Trans': opt.Transformation, 'Feat': opt.FeatureExtraction,
 		               'Seq': opt.SequenceModeling, 'Pred': opt.Prediction}
 		
+		
 		""" Transformation """
-		if opt.Transformation == 'TPS':
-			self.Transformation = TPS_SpatialTransformerNetwork(
-				F=opt.num_fiducial, I_size=(opt.imgH, opt.imgW), I_r_size=(opt.imgH, opt.imgW),
-				I_channel_num=opt.input_channel)
-		else:
-			print('No Transformation module specified')
+		self.Transformation = TransformationModelFactory.get_transformation_model(opt)
 		
 		""" FeatureExtraction """
-		if opt.FeatureExtraction == 'VGG':
-			self.FeatureExtraction = VGG_FeatureExtractor(opt.input_channel, opt.output_channel)
-		elif opt.FeatureExtraction == 'RCNN':
-			self.FeatureExtraction = RCNN_FeatureExtractor(opt.input_channel, opt.output_channel)
-		elif opt.FeatureExtraction == 'ResNet':
-			self.FeatureExtraction = ResNet_FeatureExtractor(opt.input_channel, opt.output_channel)
-		else:
-			raise Exception('No FeatureExtraction module specified')
+		self.FeatureExtraction = FeatureExtractorFactory.get_feature_extractor_model(opt)
+		if self.FeatureExtraction is None:
+			print("feature extraction model cannot be null for this model")
+			raise Exception("Feature extractor is None or not defined.  Feature Extractor={}".format(
+				opt.FeatureExtraction))
 		self.FeatureExtraction_output = opt.output_channel  # int(imgH/16-1) * 512
 		self.AdaptiveAvgPool = nn.AdaptiveAvgPool2d((None, 1))  # Transform final (imgH/16-1) -> 1
 		
-		""" Sequence modeling"""
-		if opt.SequenceModeling == 'BiLSTM' and opt.Prediction != "transformer":
-			self.SequenceModeling = nn.Sequential(
-				BidirectionalLSTM(self.FeatureExtraction_output, opt.hidden_size, opt.hidden_size),
-				BidirectionalLSTM(opt.hidden_size, opt.hidden_size, opt.hidden_size))
-			self.SequenceModeling_output = opt.hidden_size
-		else:
-			print('No SequenceModeling module specified')
-			self.SequenceModeling_output = self.FeatureExtraction_output
-		
-		""" Prediction """
-		if opt.Prediction == 'CTC':
-			self.Prediction = nn.Linear(self.SequenceModeling_output, opt.num_class)
-		if opt.Prediction == 'Attn':
-			self.Prediction = Attention(self.SequenceModeling_output, opt.hidden_size, opt.num_class)
-		elif opt.Prediction == "transformer":
-			#  ref ;https://pytorch.org/tutorials/beginner/translation_transformer.html
-			self.Prediction = Seq2SeqTransformer(opt.encoder_count, opt.decoder_count, self.SequenceModeling_output,
-			                                     opt.attention_heads,
-			                                     opt.num_class,
-			                                     opt.hidden_size)
-			for p in self.Prediction.parameters():
-				if p.dim() > 1:
-					nn.init.xavier_uniform_(p)
-		else:
-			raise Exception('Prediction is neither Attn or transformer')
+		"""Recogniser"""
+		self.recogniser = RecogniserFactory.get_recogniser(opt, self.FeatureExtraction_output)
+
 	
 	# regex is used if we expect predicted text to follow certain pattern. ex: regex for PAN number is "[A-Z]{5}[
 	# 0-9]{4}[A-Z]{1}" so here for first five positions, predicted probablities of numbers and special characters
@@ -88,11 +60,21 @@ class Model(nn.Module):
 		""" Transformation stage """
 		if not self.stages['Trans'] == "None":
 			input = self.Transformation(input)
+			
+			
+		if self.Transformation is not None:
+			input=self.Transformation(input)
+			
+		
 		
 		""" Feature extraction stage """
 		visual_feature = self.FeatureExtraction(input)
 		visual_feature = self.AdaptiveAvgPool(visual_feature.permute(0, 3, 1, 2))  # [b, c, h, w] -> [b, w, c, h]
 		visual_feature = visual_feature.squeeze(3)
+		
+		
+		# recognition stage :
+		prediction = self.recogniser(visual_feature,text,is_train, self.opt.batch_max_length, regex,self.character)
 		
 		""" Sequence modeling stage """
 		# BiLSTM encoder is not used in transformer.

@@ -14,7 +14,7 @@ import numpy as np
 import configuration
 from utils import AttnLabelConverter, Averager, getCharacterList, CTCLabelConverterForBaiduWarpctc, CTCLabelConverter
 from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset
-from models.model import Model
+from models.four_stage_model import Model
 from test import validation
 
 
