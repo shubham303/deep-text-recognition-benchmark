@@ -7,9 +7,9 @@ import torch.utils.data
 
 import configuration
 from dataset import RawDataset, AlignCollate
-from models.four_stage_model import Model
+from model_factories.end2end_model_factory import ModelFactory
+from models.three_stage_model import ThreeStageModel
 from utils import AttnLabelConverter, getCharacterList, CTCLabelConverter
-
 
 def demo(opt):
 	""" model configuration """
@@ -22,9 +22,12 @@ def demo(opt):
 	
 	if opt.rgb:
 		opt.input_channel = 3
-	model = Model(opt, converter.character)
+		
+	model = ModelFactory.getModel(opt, converter.character)                     # use factory method to get the model
+	
 	print('model input parameters', opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel,
-	      opt.hidden_size, opt.num_class, opt.batch_max_length, opt.Transformation, opt.FeatureExtraction,
+	      opt.hidden_size, opt.num_class, opt.batch_max_length, opt.model,  opt.Transformation, \
+	                                                                           opt.FeatureExtraction,
 	      opt.SequenceModeling, opt.Prediction)
 	model = torch.nn.DataParallel(model).to(configuration.device)
 	
@@ -104,6 +107,8 @@ if __name__ == '__main__':
 	parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
 	parser.add_argument('--PAD', action='store_true', help='whether to keep ratio then pad for image resize')
 	""" Model Architecture """
+	parser.add_argument('--model', type=str, help="type of model. three_stage_model|vit")
+	parser.add_argument('--recogniser', type=str, help="recongnition model name ctc|attn|transformer|vit")
 	parser.add_argument('--Transformation', type=str, required=True, help='Transformation stage. None|TPS')
 	parser.add_argument('--FeatureExtraction', type=str, required=True, help='FeatureExtraction stage. VGG|RCNN|ResNet')
 	parser.add_argument('--SequenceModeling', type=str, required=True, help='SequenceModeling stage. None|BiLSTM')

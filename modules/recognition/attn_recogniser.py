@@ -6,26 +6,28 @@ import torch.nn.functional as F
 
 import configuration
 from model_factories.ModelFactory import EncoderFactory
-from modules.sequence_modeling import BidirectionalLSTM
 
 
 class AttnRecogniser(nn.Module):
 	
 	def __init__(self, opt, input_size):
 		super().__init__()
+		self.encoder =  EncoderFactory.get_encoder(opt,input_size)
 		
-		self.encoder =  EncoderFactory.get_encoder(opt)
-		
-		if opt.Prediction =="Attn":
-			self.Prediction = Attention(input_size, opt.hidden_size, opt.num_class)
+		if self.encoder:
+			input_size = opt.hidden_size
+			
+		if opt.Prediction =="attn":
+			self.decoder = Attention(input_size, opt.hidden_size, opt.num_class)
 		else:
 			raise Exception('incorrect  prediction model: {}'.format(opt.Prediction))
 	
-	def forward(self, x):
+	def forward(self, x,text,is_train=True, batch_max_length=25,regex=None, character_list=None):
 		if self.encoder is not None:
 			x= self.encoder(x)
-		x=self.decoder(x.contiguous())
+		x=self.decoder(x.contiguous(),text,is_train,batch_max_length, regex, character_list)
 		
+		return x
 
 class Attention(nn.Module):
 	

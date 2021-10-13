@@ -1,12 +1,9 @@
+from torch import nn
+
 from modules.feature_extraction import VGG_FeatureExtractor, RCNN_FeatureExtractor, ResNet_FeatureExtractor
-from modules.recognition.attn_recogniser import AttnRecogniser
-from modules.recognition.ctc_recogniser import CTCRecogniser
-from modules.recognition.transformer_recogniser import TransformerRecogniser
-from modules.recognition.vision_transformer import VisionTransformerRecogniser
+
 from modules.sequence_modeling import BidirectionalLSTM
 from modules.transformation import TPS_SpatialTransformerNetwork
-
-from modules.recognition import *
 
 class TransformationModelFactory():
 	def __init__(self):
@@ -54,31 +51,10 @@ class FeatureExtractorFactory():
 		
 class EncoderFactory:
 	@staticmethod
-	def get_encoder(opt):
-		if opt.FeatureExtraction == "BiLstm":
-			return BidirectionalLSTM(opt.output_channel, opt.hidden_size, opt.hidden_size),
+	def get_encoder(opt, input_size):
+		if opt.SequenceModeling == "bilstm":
+			return nn.Sequential(
+                BidirectionalLSTM(input_size, opt.hidden_size, opt.hidden_size),
+                BidirectionalLSTM(opt.hidden_size, opt.hidden_size, opt.hidden_size))
 		return None
 	
-class RecogniserFactory:
-	
-	@staticmethod
-	def get_recogniser(opt, input_size):
-		if opt.recogniser == "ctc":
-			return CTCRecogniser(opt, input_size)
-		
-		if opt.recogniser == "attn":
-			return AttnRecogniser(opt, input_size)
-		
-		if opt.recogniser =="transformer":
-			return TransformerRecogniser(opt, input_size)
-		
-		if opt.recogniser == "vit":
-			return VisionTransformerRecogniser(opt, input_size)
-		
-		else:
-			if opt.recogniser==None :
-				print("recogniser not declared")
-				raise("opt.recogniser value cannot be null")
-			else:
-				print("{} recogniser not declared".format(opt.recogniser))
-				raise Exception("{} recogniser not available".format(opt.recogniser))

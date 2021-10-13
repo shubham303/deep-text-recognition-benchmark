@@ -12,20 +12,18 @@ class CTCRecogniser(nn.Module):
 	def __init__(self,opt, input_size):
 		super().__init__()
 		
-		
-		self.encoder =  EncoderFactory.get_encoder(opt)
+		self.encoder =  EncoderFactory.get_encoder(opt,input_size)
 		
 		if self.encoder:
 			input_size= opt.hidden_size
 		
-		if opt.Prediction == 'CTC':
-			self.prediction =  nn.Linear(input_size, opt.num_class)
-		else:
-			raise Exception('incorrect prediction model: {}'.format(opt.Prediction))
+		
+		self.prediction =  nn.Linear(input_size, opt.num_class)
+
 	
-	def forward(self, x,**kwargs):
+	def forward(self,x):
 		if self.encoder is not None:                   # output of CNN feature extractor. is directly fed to linear # layer.
-			x=self.encoder(x,kwargs)
+			x=self.encoder(x)
 		return self.prediction(x.contiguous())
 	
 	

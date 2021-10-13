@@ -5,9 +5,5 @@ class A:
 class B :
 	j =10
 	
-s=A()
-b=B()
-b.j=100
-print(b.j)
-s.a(b)
-print(b.j)
+a=A()
+print(isinstance(a, B))

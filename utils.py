@@ -109,7 +109,7 @@ class AttnLabelConverter(object):
         # character (str): set of the possible characters.
         # [GO] for the start token of the attention decoder. [s] for end-of-sentence token.
 
-        # same list_token variable is defined in four_stage_model.py. If you make changes here, then make changes in that code also.
+        # same list_token variable is defined in three_stage_model.py. If you make changes here, then make changes in that code also.
         list_token =  ['[GO]', '[s]']  # ['[GO]','[s]','[UNK]','[PAD]']
         list_character = list(character)
         self.character = list_token + list_character

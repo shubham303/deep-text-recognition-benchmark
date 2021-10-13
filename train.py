@@ -12,9 +12,9 @@ import torch.utils.data
 import numpy as np
 
 import configuration
+from model_factories.end2end_model_factory import ModelFactory
 from utils import AttnLabelConverter, Averager, getCharacterList, CTCLabelConverterForBaiduWarpctc, CTCLabelConverter
 from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset
-from models.four_stage_model import Model
 from test import validation
 
 
@@ -55,7 +55,7 @@ def train(opt):
 
     if opt.rgb:
         opt.input_channel = 3
-    model = Model(opt, converter.character)
+    model = ModelFactory.getModel(opt, converter.character)  # use factory method to get the model
     print('model input parameters', opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel,
           opt.hidden_size, opt.num_class, opt.batch_max_length, opt.Transformation, opt.FeatureExtraction,
           opt.SequenceModeling, opt.Prediction)
@@ -267,7 +267,11 @@ if __name__ == '__main__':
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
     parser.add_argument('--PAD', action='store_true', help='whether to keep ratio then pad for image resize')
     parser.add_argument('--data_filtering_off', action='store_true', help='for data_filtering_off mode')
+  
     """ Model Architecture """
+    parser.add_argument('--model', type=str, help="type of model. three_stage_model|vit")
+    parser.add_argument('--recogniser', type=str , help="recongnition model name ctc|attn|transformer|vit")
+   
     parser.add_argument('--Transformation', type=str, required=True, help='Transformation stage. None|TPS')
     parser.add_argument('--FeatureExtraction', type=str, required=True,
                         help='FeatureExtraction stage. VGG|RCNN|ResNet')
@@ -282,7 +286,20 @@ if __name__ == '__main__':
     parser.add_argument('--encoder_count', type=int, default=2, help='number of encoders in transformer')
     parser.add_argument('--decoder_count', type=int, default=2, help=' number of decoders in transformer')
     parser.add_argument('--attention_heads', type=int, default=1, help='number of attention heads in transformer')
+
+    """VIT model architecture"""
+    parser.add_argument('--patch_size', type=int, default=4, help="patch size for vit")
+    parser.add_argument('--emb_size', type=int , default=512, help="size of embedding vector")
+    
+    
+    """ language parameters"""
     parser.add_argument('--lang', type=str, default="eng", help='language of data')
+    
+    
+    
+   
+    
+    
     opt = parser.parse_args()
 
     if not opt.exp_name:

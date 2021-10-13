@@ -6,6 +6,41 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer, Transformer, T
 	TransformerDecoder, LayerNorm
 
 import configuration
+from modules.recognition.utils import PatchEmbedding, create_mask, TokenEmbedding, PositionalEncoding2, \
+	PositionalEncoding, generate_square_subsequent_mask
+
+
+class VisionTransformerWithDecoder(nn.Module):
+	"""
+	variation of vision transformer that uses decoder for prediction.
+	"""
+	
+	def __init__(self, opt, dropout=0.1):
+		"""
+		opt : contains arguments passed to the program
+		input_size= size of input feature vectors, input_size depends on size of output of last layer.
+		"""
+		super().__init__()
+		patch_emb = PatchEmbedding(opt.input_channel, opt.patch_size, opt.emb_size)
+		positional_encoding = PositionalEncoding(
+			opt.output_channel, dropout=dropout)
+		self.Prediction = Seq2SeqTransformer(opt.encoder_count,
+		                                     opt.decoder_count,
+		                                     patch_emb,
+		                                     positional_encoding,
+		                                     opt.emb_size,
+		                                     opt.attention_heads,
+		                                     opt.num_class,
+		                                     opt.hidden_size
+		                                     )
+		for p in self.Prediction.parameters():
+			if p.dim() > 1:
+				nn.init.xavier_uniform_(p)
+	
+	def forward(self, x, text, is_train=True, batch_max_length=25, regex=None, character_list=None):
+		
+		return self.Prediction(x.contiguous(), text, is_train, batch_max_length, regex, character_list, tgt_mask,
+		                       tgt_padding_mask)
 
 
 class TransformerRecogniser(nn.Module):
@@ -16,8 +51,8 @@ class TransformerRecogniser(nn.Module):
 		"""
 		super().__init__()
 		patch_emb = TokenEmbedding(opt.num_class, input_size)
-		positional_encoding = PositionalEncoding(
-			opt.emb_size, dropout=dropout)
+		positional_encoding = PositionalEncoding2(
+			input_size, dropout=dropout)
 		self.Prediction = Seq2SeqTransformer(opt.encoder_count,
 		                                     opt.decoder_count,
 		                                     patch_emb,
@@ -31,8 +66,9 @@ class TransformerRecogniser(nn.Module):
 			if p.dim() > 1:
 				nn.init.xavier_uniform_(p)
 	
-	def forward(self, x):
-		return self.Prediction(x.contiguous())
+	def forward(self, x,text,is_train=True, batch_max_length=25,regex=None, character_list=None ):
+		src_mask, tgt_mask, tgt_padding_mask = create_mask(x.contiguous(), text)
+		return self.Prediction(x.contiguous(),text,is_train, batch_max_length, regex, character_list, tgt_mask, tgt_padding_mask )
 
 
 class Seq2SeqTransformer(nn.Module):
@@ -76,6 +112,7 @@ class Seq2SeqTransformer(nn.Module):
 		self.tgt_tok_emb = patch_embedding
 		self.positional_encoding = positional_encoding  # this is 1D positional encoding. we can use 2d encoding also
 		self.num_classes = tgt_vocab_size
+		
 	
 	def forward(self,
 	            src: Tensor,
@@ -83,9 +120,7 @@ class Seq2SeqTransformer(nn.Module):
 	            is_train=True,
 	            batch_max_len=25,
 	            regex=None,
-	            character_list=None,
-	            tgt_mask: Tensor = None,
-	            tgt_padding_mask: Tensor = None,
+	            character_list=None
 	            ):
 		"""
 
@@ -99,10 +134,11 @@ class Seq2SeqTransformer(nn.Module):
 		:param tgt_padding_mask:
 		:return:
 		"""
+		src_mask, tgt_mask, tgt_padding_mask = create_mask(src.contiguous(), trg)
+		src_emb = self.positional_encoding(src)
+		
 		if is_train:
-			src_emb = self.positional_encoding(src)
 			tgt_emb = self.positional_encoding(self.tgt_tok_emb(trg))
-			
 			outs = self.transformer(src_emb, tgt_emb, None, tgt_mask, None,
 			                        None, tgt_padding_mask, None)
 			return self.generator(outs)
@@ -144,49 +180,3 @@ class Seq2SeqTransformer(nn.Module):
 			tgt)), memory,
 			tgt_mask)
 
-
-class TokenEmbedding(nn.Module):
-	def __init__(self, vocab_size: int, emb_size):
-		super(TokenEmbedding, self).__init__()
-		self.embedding = nn.Embedding(vocab_size, emb_size)
-		self.emb_size = emb_size
-	
-	def forward(self, tokens: Tensor):
-		return self.embedding(tokens.long()) * math.sqrt(self.emb_size)
-
-
-class PositionalEncoding(nn.Module):
-	def __init__(self,
-	             emb_size: int,
-	             dropout: float,
-	             maxlen: int = 5000):
-		super(PositionalEncoding, self).__init__()
-		den = torch.exp(- torch.arange(0, emb_size, 2) * math.log(10000) / emb_size)
-		pos = torch.arange(0, maxlen).reshape(maxlen, 1)
-		pos_embedding = torch.zeros((maxlen, emb_size))
-		pos_embedding[:, 0::2] = torch.sin(pos * den)
-		pos_embedding[:, 1::2] = torch.cos(pos * den)
-		pos_embedding = pos_embedding.unsqueeze(-2)
-		
-		self.dropout = nn.Dropout(dropout)
-		self.register_buffer('pos_embedding', pos_embedding)
-	
-	def forward(self, token_embedding: Tensor):
-		return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
-
-def generate_square_subsequent_mask(sz):
-	mask = (torch.triu(torch.ones((sz, sz), device=configuration.device)) == 1).transpose(0, 1)
-	mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-	return mask
-
-
-def create_mask(src, tgt):
-	# todo make dimension of src is wrong
-	src_seq_len = src.shape[2]
-	tgt_seq_len = tgt.shape[1]
-	tgt_mask = generate_square_subsequent_mask(tgt_seq_len)
-	src_mask = torch.zeros((src_seq_len, src_seq_len), device=configuration.device).type(torch.bool)
-	# 2: index of padding token in character list.
-	tgt_padding_mask = (tgt == 0)
-	tgt_padding_mask[:, 0] = False  # dont mask first go symbol
-	return src_mask, tgt_mask, tgt_padding_mask

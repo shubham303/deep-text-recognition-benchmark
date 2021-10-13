@@ -16,19 +16,20 @@ limitations under the License.
 
 import torch.nn as nn
 
-from modules.recognition.transformer_recogniser import Seq2SeqTransformer, create_mask
-from modules.feature_extraction import VGG_FeatureExtractor, RCNN_FeatureExtractor, ResNet_FeatureExtractor
-from modules.recognition.attn_recogniser import Attention
-from modules.sequence_modeling import BidirectionalLSTM
-from modules.transformation import TPS_SpatialTransformerNetwork
-from model_factories.ModelFactory import TransformationModelFactory, FeatureExtractorFactory, EncoderFactory, \
-	RecogniserFactory
+
+from model_factories.RecogniserFactory import RecogniserFactory
+from model_factories.ModelFactory import TransformationModelFactory,FeatureExtractorFactory
+from modules.recognition.ctc_recogniser import CTCRecogniser
 
 
-class FourStageModel(nn.Module):
+class ThreeStageModel(nn.Module):
+	"""
+	This class represents generic text recognition model of 3 stages, 1) spatical transformation  2) feature
+	extraction   3) Seq2seq processor like LSTM , CTC, Transformer etc.
+	"""
 	
 	def __init__(self, opt, character):
-		super(FourStageModel, self).__init__()
+		super(ThreeStageModel, self).__init__()
 		self.opt = opt
 		# self.character is passed to prediction model to mask certain characters during prediction of regex based text
 		self.character = character
@@ -56,43 +57,20 @@ class FourStageModel(nn.Module):
 	# 0-9]{4}[A-Z]{1}" so here for first five positions, predicted probablities of numbers and special characters
 	# are set to -infinity.
 	def forward(self, input, text, is_train=True, regex=None):
-		
-		""" Transformation stage """
-		if not self.stages['Trans'] == "None":
-			input = self.Transformation(input)
-			
 			
 		if self.Transformation is not None:
 			input=self.Transformation(input)
 			
-		
 		
 		""" Feature extraction stage """
 		visual_feature = self.FeatureExtraction(input)
 		visual_feature = self.AdaptiveAvgPool(visual_feature.permute(0, 3, 1, 2))  # [b, c, h, w] -> [b, w, c, h]
 		visual_feature = visual_feature.squeeze(3)
 		
-		
 		# recognition stage :
-		prediction = self.recogniser(visual_feature,text,is_train, self.opt.batch_max_length, regex,self.character)
-		
-		""" Sequence modeling stage """
-		# BiLSTM encoder is not used in transformer.
-		if self.stages['Seq'] == 'BiLSTM' and self.stages['Pred'] != "transformer":
-			contextual_feature = self.SequenceModeling(visual_feature)
+		if isinstance(self.recogniser , CTCRecogniser):
+			prediction = self.recogniser(visual_feature)
 		else:
-			contextual_feature = visual_feature  # for convenience. this is NOT contextually modeled by BiLSTM
-
-		""" Prediction stage """
-		if self.stages['Pred'] == 'CTC':
-			prediction = self.Prediction(contextual_feature.contiguous())
-		if self.stages['Pred'] == "Attn":
-			prediction = self.Prediction(contextual_feature.contiguous(), text, is_train,
-			                             self.opt.batch_max_length, regex, self.character)
-		else:
-			src_mask, tgt_mask, tgt_padding_mask = create_mask(contextual_feature.contiguous(), text)
-			
-			prediction = self.Prediction(contextual_feature.contiguous(), text, is_train, self.opt.batch_max_length,
-			                             regex,
-			                             self.character, tgt_mask, tgt_padding_mask)
+			prediction = self.recogniser(visual_feature, text, is_train, self.opt.batch_max_length, regex,
+			                             self.character)
 		return prediction
